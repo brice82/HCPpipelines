@@ -59,14 +59,14 @@
 # Output path specifiers
 #
 # * <code>${StudyFolder}</code> is an input parameter
-# * <code>${Subject}</code> is an input parameter
+# * <code>${Session}</code> is an input parameter
 #
 # Main output directories
 #
-# * <code>DiffFolder=${StudyFolder}/${Subject}/Diffusion</code>
-# * <code>T1wDiffFolder=${StudyFolder}/${Subject}/T1w/Diffusion</code>
+# * <code>DiffFolder=${StudyFolder}/${Session}/Diffusion</code>
+# * <code>T1wDiffFolder=${StudyFolder}/${Session}/T1w/Diffusion</code>
 #
-# All outputs are within the directory: <code>${StudyFolder}/${Subject}</code>
+# All outputs are within the directory: <code>${StudyFolder}/${Session}</code>
 #
 # The full list of output directories are the following
 #
@@ -78,7 +78,7 @@
 # * <code>$T1wDiffFolder</code>
 #
 # Also assumes that T1 preprocessing has been carried out with results in
-# <code>${StudyFolder}/${Subject}/T1w</code>
+# <code>${StudyFolder}/${Session}/T1w</code>
 #
 # <!-- References -->
 #
@@ -174,25 +174,26 @@ DEFAULT_DEGREES_OF_FREEDOM=6
 # Perform the steps of the HCP Diffusion Preprocessing Pipeline
 opts_SetScriptDescription "Perform the steps of the HCP Diffusion Preprocessing Pipeline"
 
-opts_AddMandatory '--path' 'StudyFolder' 'Path' "path to subject's data folder" 
+opts_AddMandatory '--path' 'StudyFolder' 'Path' "path to session's data folder" 
 
-opts_AddMandatory '--subject' 'Subject' 'subject ID' "subject-id"
+opts_AddMandatory '--session' 'Session' 'session ID' "" "--subject"
 
-opts_AddMandatory '--PEdir' 'PEdir' 'Path' "Phase encoding direction specifier: 1=LR/RL, 2=AP/PA"
+opts_AddMandatory '--PEdir' 'PEdir' '1 or 2' "Phase encoding direction specifier: 1=LR/RL, 2=AP/PA"
 
 opts_AddMandatory '--posData' 'PosInputImages' 'data_RL1@data_RL2@...data_RLn' "An @ symbol separated list of data with 'positive' phase  encoding direction; e.g., data_RL1@data_RL2@...data_RLn, or data_PA1@data_PA2@...data_PAn"
 
 opts_AddMandatory '--negData' 'NegInputImages' 'data_LR1@data_LR2@...data_LRn' "An @ symbol separated list of data with 'negative' phase encoding direction; e.g., data_LR1@data_LR2@...data_LRn, or data_AP1@data_AP2@...data_APn"
 
-opts_AddMandatory '--echospacing' 'echospacing' 'Number in msec' "Echo spacing in msecs"
+opts_AddOptional '--echospacing-seconds' 'echospacingsec' 'Number in sec' "Echo spacing in seconds, REQUIRED (or deprecated millisec option)"
+opts_AddOptional '--echospacing' 'echospacing' 'Number in millisec' "DEPRECATED: please use --echospacing-seconds"
 
 opts_AddMandatory '--gdcoeffs' 'GdCoeffs' 'Path' "Path to file containing coefficients that describe spatial variations of the scanner gradients. Applied *after* 'eddy'. Use --gdcoeffs=NONE if not available."
 
 opts_AddOptional '--dwiname' 'DWIName' 'String' "Name to give DWI output directories. Defaults to Diffusion" "Diffusion"
 
-opts_AddOptional '--dof' 'DegreesOfFreedom' 'Number' "Degrees of Freedom for post eddy registration to structural images. Defaults to '${DEFAULT_DEGREES_OF_FREEDOM}'" "'${DEFAULT_DEGREES_OF_FREEDOM}'"
+opts_AddOptional '--dof' 'DegreesOfFreedom' 'Number' "Degrees of Freedom for post eddy registration to structural images. Defaults to '${DEFAULT_DEGREES_OF_FREEDOM}'" "${DEFAULT_DEGREES_OF_FREEDOM}"
 
-opts_AddOptional '--b0maxbval' 'b0maxbval' 'Value' "Volumes with a bvalue smaller than this value will be considered as b0s. Defaults to '${DEFAULT_B0_MAX_BVAL}'" "'${DEFAULT_B0_MAX_BVAL}'"
+opts_AddOptional '--b0maxbval' 'b0maxbval' 'Value' "Volumes with a bvalue smaller than this value will be considered as b0s. Defaults to '${DEFAULT_B0_MAX_BVAL}'" "${DEFAULT_B0_MAX_BVAL}"
 
 opts_AddOptional '--topup-config-file' 'TopupConfig' 'Path' "File containing the FSL topup configuration. Defaults to b02b0.cnf in the HCP configuration directory '(as defined by HCPPIPEDIR_Config).'"
 
@@ -221,6 +222,9 @@ opts_AddOptional '--combine-data-flag' 'CombineDataFlag' 'number' "Specified val
 Defaults to 1" "1"
 
 opts_AddOptional '--printcom' 'runcmd' 'echo' 'to echo or otherwise  output the commands that would be executed instead of  actually running them. --printcom=echo is intended to  be used for testing purposes'
+#longitudinal options
+opts_AddOptional '--is-longitudinal' 'IsLongitudinal' 'TRUE/FALSE' "Specifies whether this is run on a longitudinal timepoint" "0"
+opts_AddOptional '--longitudinal-session' 'SessionLong' 'folder' "Specifies longitudinal session name. If specified,  --session must point to the cross-sectional session." "NONE"
 
 opts_ParseArguments "$@"
 
@@ -246,6 +250,36 @@ gpu=$(opts_StringToBool "$gpuString")
 if [[ "$TopupConfig" == "" ]]
 then
     TopupConfig="${HCPPIPEDIR_Config}/b02b0.cnf"
+fi
+
+#resolve echo spacing being required and exclusivity
+if [[ "$echospacing" == "" && "$echospacingsec" == "" ]]
+then
+    log_Err_Abort "You must specify --echospacing-seconds or --echospacing"
+fi
+
+if [[ "$echospacing" != "" && "$echospacingsec" != "" ]]
+then
+    log_Err_Abort "You must not specify both --echospacing-seconds and --echospacing"
+fi
+
+#internally, PreEddy script expects milliseconds
+if [[ "$echospacingsec" != "" ]]
+then
+    echospacingmilli=$(echo "$echospacingsec * 1000" | bc -l)
+else
+    #could add a deprecation warning here, if we want to remove the old parameter in the future
+    echospacingmilli="$echospacing"
+fi
+
+#check for input unit errors
+if [[ $(echo "$echospacingmilli < 10 && $echospacingmilli > 0.01" | bc) == 0* ]]
+then
+    log_Err_Abort "$echospacingmilli milliseconds is not a sane value for echo spacing"
+fi
+if [[ $(echo "$echospacingmilli < 1 && $echospacingmilli > 0.1" | bc) == 0* ]]
+then
+    log_Warn "$echospacingmilli milliseconds seems unlikely for echo spacing, continuing anyway"
 fi
 
 "$HCPPIPEDIR"/show_version
@@ -276,6 +310,19 @@ if ((SelectBestB0)); then
     fi
 fi
 
+#parse longitudinal arguments
+IsLongitudinal=$(opts_StringToBool "$IsLongitudinal")
+T1wCross2LongXfm=""
+
+if (( IsLongitudinal )); then
+    if [ ! -d "$StudyFolder/$SessionLong" ]; then
+        log_Err_Abort "the --longitudinal-session must be specified and folder must exist in longitudinal mode"
+    fi
+    T1wCross2LongXfm=$StudyFolder/$SessionLong/T1w/xfms/T1w_cross_to_T1w_long.mat
+    if [ ! -f "$T1wCross2LongXfm" ]; then 
+        log_Err_Abort "Longitudinal session $SessionLong: cross-sectional to longitudinal transform $T1wCross2LongXfm does not exist. Has longtudinal PostFreesurfer been run?"
+    fi
+fi
 
 #
 # Function Description
@@ -312,50 +359,60 @@ validate_scripts() {
 # Validate scripts
 validate_scripts "$@"
 
-log_Msg "Invoking Pre-Eddy Steps"
-pre_eddy_cmd=("${HCPPIPEDIR}/DiffusionPreprocessing/DiffPreprocPipeline_PreEddy.sh"
-    "--path=${StudyFolder}"
-    "--subject=${Subject}"
-    "--dwiname=${DWIName}"
-    "--PEdir=${PEdir}"
-    "--posData=${PosInputImages}"
-    "--negData=${NegInputImages}"
-    "--echospacing=${echospacing}"
-    "--b0maxbval=${b0maxbval}"
-    "--topup-config-file=${TopupConfig}"
-    "--printcom=${runcmd}"
-    "--select-best-b0=${SelectBestB0}"
-    "--ensure-even-slices=${EnsureEvenSlices}")
+if (( ! IsLongitudinal )); then 
+    log_Msg "Invoking Pre-Eddy Steps"
+    pre_eddy_cmd=("${HCPPIPEDIR}/DiffusionPreprocessing/DiffPreprocPipeline_PreEddy.sh"
+        "--path=${StudyFolder}"
+        "--session=${Session}"
+        "--dwiname=${DWIName}"
+        "--PEdir=${PEdir}"
+        "--posData=${PosInputImages}"
+        "--negData=${NegInputImages}"
+        "--echospacing=${echospacingmilli}"
+        "--b0maxbval=${b0maxbval}"
+        "--topup-config-file=${TopupConfig}"
+        "--printcom=${runcmd}"
+        "--select-best-b0=${SelectBestB0}"
+        "--ensure-even-slices=${EnsureEvenSlices}")
 
-log_Msg "pre_eddy_cmd: ${pre_eddy_cmd[*]}"
-"${pre_eddy_cmd[@]}"
+    log_Msg "pre_eddy_cmd: ${pre_eddy_cmd[*]}"
+    "${pre_eddy_cmd[@]}"
 
-log_Msg "Invoking Eddy Step"
-eddy_cmd=("${HCPPIPEDIR}"/DiffusionPreprocessing/DiffPreprocPipeline_Eddy.sh
-    --path="$StudyFolder"
-    --subject="$Subject"
-    --dwiname="$DWIName"
-    --printcom="$runcmd"
-    --gpu="$gpu"
-    --cuda-version="$cuda_version")
-for extra_eddy_arg in ${extra_eddy_args[@]+"${extra_eddy_args[@]}"}
-do
-    eddy_cmd+=(--extra-eddy-arg="$extra_eddy_arg")
-done
+    log_Msg "Invoking Eddy Step"
+    eddy_cmd=("${HCPPIPEDIR}"/DiffusionPreprocessing/DiffPreprocPipeline_Eddy.sh
+        --path="$StudyFolder"
+        --session="$Session"
+        --dwiname="$DWIName"
+        --printcom="$runcmd"
+        --gpu="$gpu"
+        --cuda-version="$cuda_version")
+    for extra_eddy_arg in ${extra_eddy_args[@]+"${extra_eddy_args[@]}"}
+    do
+        eddy_cmd+=(--extra-eddy-arg="$extra_eddy_arg")
+    done
 
-log_Msg "eddy_cmd: ${eddy_cmd[*]}"
-"${eddy_cmd[@]}"
+    log_Msg "eddy_cmd: ${eddy_cmd[*]}"
+    "${eddy_cmd[@]}"
+else #copy cross-sectional output to longitudinal session
+    log_Msg "Longitudinal mode, copying cross-sectional output of Pre-Eddy and Eddy steps to longitudinal session"
+    cp -rf "$StudyFolder/$Session/Diffusion" "$StudyFolder/$SessionLong/Diffusion"
+    cp -rf "$StudyFolder/$Session/T1w/Diffusion" "$StudyFolder/$SessionLong/T1w/Diffusion"
+fi
+
+#PostEddy step must be run on longitudinal session rather than copied from cross-sectional.
+if (( IsLongitudinal )); then Session="$SessionLong"; fi
 
 log_Msg "Invoking Post-Eddy Steps"
 post_eddy_cmd=("${HCPPIPEDIR}/DiffusionPreprocessing/DiffPreprocPipeline_PostEddy.sh"
     "--path=${StudyFolder}"
-    "--subject=${Subject}"
+    "--session=${Session}"
     "--dwiname=${DWIName}"
     "--gdcoeffs=${GdCoeffs}"
     "--dof=${DegreesOfFreedom}"
     "--combine-data-flag=${CombineDataFlag}"
     "--printcom=${runcmd}"
-    "--select-best-b0=${SelectBestB0}")
+    "--select-best-b0=${SelectBestB0}"
+    "--t1w-cross2long-xfm=${T1wCross2LongXfm}")
 
 log_Msg "post_eddy_cmd: ${post_eddy_cmd[*]}"
 "${post_eddy_cmd[@]}"

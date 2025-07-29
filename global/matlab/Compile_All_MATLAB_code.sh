@@ -120,6 +120,11 @@ main()
 	get_options "$@"
 	
 	log_Msg "----------------------------------------"
+	log_Msg "Compiling fMRIVolume-related MATLAB code"
+	log_Msg "----------------------------------------"
+	"${HCPPIPEDIR}"/fMRIVolume/scripts/Compile_MATLAB_code.sh
+
+	log_Msg "----------------------------------------"
 	log_Msg "Compiling ICAFIX-related MATLAB code"
 	log_Msg "----------------------------------------"
 	"${HCPPIPEDIR}"/ICAFIX/scripts/Compile_MATLAB_code.sh
@@ -138,6 +143,11 @@ main()
 	log_Msg "Compiling tICA-related MATLAB code"
 	log_Msg "----------------------------------------"
 	"${HCPPIPEDIR}"/tICA/scripts/Compile_MATLAB_code.sh
+
+	log_Msg "----------------------------------------"
+	log_Msg "Compiling TransmitBias-related MATLAB code"
+	log_Msg "----------------------------------------"
+	"${HCPPIPEDIR}"/TransmitBias/scripts/Compile_MATLAB_code.sh
 
 	log_Msg "----------------------------------------"
 	log_Msg "Compiling global script MATLAB code"
